@@ -1,8 +1,27 @@
+import logging
 import numpy as np
 import matplotlib.pyplot as plt
 from binance.client import Client
 from binance.enums import *
-import logging
+from PIL import ImageGrab
+import datetime
+import time
+import subprocess
+import sys
+import os
+import ta
+
+# Функция для установки необходимых пакетов
+def install_packages():
+    packages = ['numpy', 'matplotlib', 'python-binance', 'ta', 'Pillow']
+    for package in packages:
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+        except Exception as e:
+            logging.error(f"Failed to install package {package}: {e}")
+
+# Установка пакетов
+install_packages()
 
 # Вставьте ваш API ключ и секрет сюда
 api_key = 'czs8NPf9uo1va2Sg4HB5NCWFO7XGNtP8RPHWLWU8eWqNw0XhqjCsPhJreJfaEMhv'
@@ -10,9 +29,6 @@ api_secret = 'v0Onk3jFT4G5Q4vufMt3eDqT2r2cKKW4NoOQC53uLNSfjRcBHfqdmYBrHaFa3Udx'
 
 # Создание клиента Binance
 client = Client(api_key, api_secret)
-
-# Настройка логирования
-logging.basicConfig(filename='trade_signals.log', level=logging.INFO, format='%(asctime)s %(message)s')
 
 def get_historical_klines(symbol, interval, start_str):
     """Получение исторических данных"""
@@ -44,53 +60,61 @@ def find_trade_signals(data, levels):
             signals.append(('Sell', i))
     return signals
 
-def plot_data(prices, signals, levels):
-    """Построение графика цен и уровней Фибоначчи"""
-    plt.figure(figsize=(14, 7))
-    plt.plot(prices, label='Close Prices')
-    
-    for level, price in levels.items():
-        plt.axhline(y=price, linestyle='--', alpha=0.5, label=f'Fibonacci {level}')
+def analyze_market():
+    """Основная функция для анализа рынка"""
+    symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT']  # добавьте сюда нужные вам символы
+    intervals = [Client.KLINE_INTERVAL_15MINUTE, Client.KLINE_INTERVAL_1HOUR]
 
-    buy_signals = [signal[1] for signal in signals if signal[0] == 'Buy']
-    sell_signals = [signal[1] for signal in signals if signal[0] == 'Sell']
-    plt.scatter(buy_signals, prices[buy_signals], marker='^', color='g', label='Buy Signal', alpha=1)
-    plt.scatter(sell_signals, prices[sell_signals], marker='v', color='r', label='Sell Signal', alpha=1)
-    
-    plt.title('Price Chart with Fibonacci Levels and Trade Signals')
-    plt.xlabel('Time')
-    plt.ylabel('Price')
+    for symbol in symbols:
+        for interval in intervals:
+            start_str = '1 month ago UTC'
+
+            # Получение исторических данных
+            klines = get_historical_klines(symbol, interval, start_str)
+            close_prices = np.array([float(kline[4]) for kline in klines])
+
+            # Рассчет уровней Фибоначчи
+            fibonacci_levels = calculate_fibonacci_levels(close_prices)
+
+            # Поиск точек входа
+            signals = find_trade_signals(close_prices, fibonacci_levels)
+
+            # Логирование сигналов
+            for signal in signals:
+                logging.info(f"Signal: {signal[0]} at index {signal[1]} (price: {close_prices[signal[1]]}) for {symbol} on {interval}")
+            
+            # Сохранение графиков с уровнями Фибоначчи и сигналами
+            save_chart(symbol, interval, close_prices, fibonacci_levels, signals)
+
+def save_chart(symbol, interval, close_prices, levels, signals):
+    """Сохранение графиков с уровнями Фибоначчи и сигналами"""
+    plt.figure(figsize=(10, 5))
+    plt.plot(close_prices, label='Close Prices')
+    for level in levels:
+        plt.axhline(y=levels[level], linestyle='--', label=f'Fibonacci {level}')
+    for signal in signals:
+        if signal[0] == 'Buy':
+            plt.plot(signal[1], close_prices[signal[1]], 'go', label='Buy Signal')
+        elif signal[0] == 'Sell':
+            plt.plot(signal[1], close_prices[signal[1]], 'ro', label='Sell Signal')
+    plt.title(f'{symbol} - {interval}')
     plt.legend()
-    plt.show()
+    plt.savefig(f'{symbol}_{interval}.png')
+    plt.close()
+
+def capture_screen(symbol, interval):
+    """Снимок экрана графика"""
+    screen = ImageGrab.grab()
+    filename = f"{symbol}_{interval}_screenshot.png"
+    screen.save(filename)
 
 def main():
-    symbol = 'BTCUSDT'
-    interval = Client.KLINE_INTERVAL_1DAY
-    start_str = '1 month ago UTC'
+    logging.basicConfig(filename='trading_signals.log', level=logging.INFO,
+                        format='%(asctime)s [%(levelname)s] %(message)s')
 
-    # Получение исторических данных
-    klines = get_historical_klines(symbol, interval, start_str)
-    close_prices = np.array([float(kline[4]) for kline in klines])
-
-    # Рассчет уровней Фибоначчи
-    fibonacci_levels = calculate_fibonacci_levels(close_prices)
-
-    # Поиск точек входа
-    signals = find_trade_signals(close_prices, fibonacci_levels)
-
-    # Вывод сигналов
-    for signal in signals:
-        message = f"Signal: {signal[0]} at index {signal[1]} (price: {close_prices[signal[1]]})"
-        print(message)
-        logging.info(message)
-
-    # Расчет примерного расстояния, которое пройдет цена
-    price_range = max(close_prices) - min(close_prices)
-    print(f"Approximate price range: {price_range}")
-    logging.info(f"Approximate price range: {price_range}")
-
-    # Построение графика
-    plot_data(close_prices, signals, fibonacci_levels)
+    while True:
+        analyze_market()
+        time.sleep(60 * 15)  # анализировать каждые 15 минут
 
 if __name__ == '__main__':
     main()
